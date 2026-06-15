@@ -32,8 +32,8 @@ const upload = multer({
 });
 
 // ── Serve static files (creator.html / viewer.html) ─────────────────────────
-// Serve from the parent directory (AR Build folder)
-app.use(express.static(path.join(__dirname, '..')));
+// In Docker: creator.html and viewer.html are copied to /app alongside index.js
+app.use(express.static(path.join(__dirname)));
 
 // ── Health check ─────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => {
