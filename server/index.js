@@ -40,6 +40,11 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: true, time: new Date().toISOString() });
 });
 
+// ── Root redirect ─────────────────────────────────────────────────────────────
+app.get('/', (req, res) => {
+  res.redirect('/creator.html');
+});
+
 // ── LIST all projects ─────────────────────────────────────────────────────────
 // GET /api/projects
 app.get('/api/projects', async (req, res) => {
