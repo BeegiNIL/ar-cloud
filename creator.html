@@ -533,8 +533,27 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-s
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image.prod.js" crossorigin="anonymous"></script>
+<script>
+// Load Three.js with CDN fallback
+(function(){
+  function loadScript(urls, idx){
+    if(idx>=urls.length) return;
+    var s=document.createElement('script');
+    s.src=urls[idx];
+    s.crossOrigin='anonymous';
+    s.onerror=function(){loadScript(urls,idx+1);};
+    document.head.appendChild(s);
+  }
+  loadScript([
+    'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js',
+    'https://unpkg.com/three@0.160.0/build/three.min.js'
+  ],0);
+  loadScript([
+    'https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image.prod.js',
+    'https://unpkg.com/mind-ar@1.2.5/dist/mindar-image.prod.js'
+  ],0);
+})();
+</script>
 <script>
 // ── LIBRARY CHECK ─────────────────────────────────────────
 window.addEventListener('load',()=>{
