@@ -1,0 +1,857 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AR Viewer</title>
+<style>
+:root{
+  --bg:#0a0a0c;--surface:rgba(18,18,22,0.95);--surface2:#1c1c22;
+  --border:rgba(255,255,255,0.09);--border2:rgba(255,255,255,0.14);
+  --text:#ededf0;--muted:#7a7a88;
+  --accent:#7c6ff7;--accent2:#a89df9;--accent-bg:rgba(124,111,247,0.12);
+  --green:#22c55e;--amber:#f59e0b;--red:#ef4444;
+  --r:10px;--r-sm:6px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;font-size:13px;height:100vh;overflow:hidden;display:flex;flex-direction:column}
+
+.topbar{height:48px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 14px;gap:10px;flex-shrink:0;backdrop-filter:blur(12px);z-index:20}
+.logo{font-size:14px;font-weight:700;color:var(--accent2);letter-spacing:-.3px}
+.logo span{color:var(--muted);font-weight:400}
+.sep{flex:1}
+.btn{padding:6px 12px;border-radius:var(--r-sm);border:1px solid var(--border2);background:transparent;color:var(--text);font-size:12px;cursor:pointer;transition:all .15s;white-space:nowrap}
+.btn:hover{background:var(--surface2)}
+.btn:disabled{opacity:.35;cursor:not-allowed}
+.btn-accent{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn-accent:hover{opacity:.85}
+.btn-sm{padding:4px 9px;font-size:11px}
+.btn-warn{border-color:rgba(245,158,11,.3);color:var(--amber)}
+
+.main{display:flex;flex:1;overflow:hidden}
+
+/* AR view */
+#ar-wrap{flex:1;position:relative;background:#000;overflow:hidden}
+#cam-vid{width:100%;height:100%;object-fit:cover;display:none}
+#ar-3d{position:absolute;inset:0;pointer-events:none}
+#ov-canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+
+#idle{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
+.idle-icon{font-size:56px;opacity:.15}
+.idle-text{color:var(--muted);font-size:14px}
+
+/* HUD */
+.hud{position:absolute;pointer-events:none}
+#hud-box{top:50%;left:50%;transform:translate(-50%,-50%);width:200px;height:150px;border:1.5px solid rgba(255,255,255,.22);border-radius:10px;display:none}
+.hc{position:absolute;width:18px;height:18px}
+.hc.tl{top:-1px;left:-1px;border-top:3px solid var(--accent2);border-left:3px solid var(--accent2);border-radius:3px 0 0 0}
+.hc.tr{top:-1px;right:-1px;border-top:3px solid var(--accent2);border-right:3px solid var(--accent2);border-radius:0 3px 0 0}
+.hc.bl{bottom:-1px;left:-1px;border-bottom:3px solid var(--accent2);border-left:3px solid var(--accent2);border-radius:0 0 0 3px}
+.hc.br{bottom:-1px;right:-1px;border-bottom:3px solid var(--accent2);border-right:3px solid var(--accent2);border-radius:0 0 3px 0}
+#scan-hint{bottom:24px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.6);color:rgba(255,255,255,.75);padding:6px 16px;border-radius:20px;font-size:12px;backdrop-filter:blur(4px);display:none;white-space:nowrap}
+#detect-badge{top:14px;right:14px;background:var(--green);color:#fff;padding:5px 12px;border-radius:20px;font-size:11px;font-weight:600;display:none}
+#mode-chip{top:14px;left:14px;padding:4px 11px;border-radius:20px;font-size:10px;font-weight:600;display:none}
+.chip-ar{background:rgba(124,111,247,.8);color:#fff}
+.chip-sim{background:rgba(245,158,11,.8);color:#fff}
+
+/* Panel */
+#panel{width:270px;background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;flex-shrink:0}
+.psec{padding:12px 14px;border-bottom:1px solid var(--border)}
+.psec-title{font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+
+/* Drop zone */
+#drop-zone{border:1.5px dashed var(--border2);border-radius:var(--r);padding:16px 10px;text-align:center;cursor:pointer;transition:all .2s;position:relative}
+#drop-zone:hover,#drop-zone.drag{border-color:var(--accent);background:var(--accent-bg)}
+#drop-zone input{position:absolute;inset:0;opacity:0;cursor:pointer}
+
+/* Asset rows */
+.asset-row{border:1px solid var(--border);border-radius:var(--r-sm);padding:8px 10px;margin-bottom:6px;cursor:pointer;transition:all .15s;position:relative}
+.asset-row:hover{background:rgba(255,255,255,.03)}
+.asset-row input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.asset-row.loaded{border-color:rgba(34,197,94,.3)}
+.ar-lbl{font-size:10px;color:var(--muted);margin-bottom:2px}
+.ar-name{font-size:12px;font-weight:500}
+.ar-check{color:var(--green);font-size:10px;float:right}
+
+/* Layer upload rows */
+.layer-upload-row{border:1px solid var(--border);border-radius:var(--r-sm);padding:7px 10px;margin-bottom:4px;cursor:pointer;transition:all .15s;position:relative;display:flex;align-items:center;gap:8px}
+.layer-upload-row:hover{background:rgba(255,255,255,.03)}
+.layer-upload-row input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.layer-upload-row.loaded{border-color:rgba(124,111,247,.35)}
+.lu-icon{font-size:16px;flex-shrink:0}
+.lu-info{flex:1;overflow:hidden}
+.lu-name{font-size:11px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lu-sub{font-size:10px;color:var(--muted)}
+
+/* Status */
+.smsg{font-size:11px;padding:7px 9px;border-radius:var(--r-sm);margin-top:6px;line-height:1.5}
+.smsg.info{background:var(--accent-bg);color:var(--accent2)}
+.smsg.ok{background:rgba(34,197,94,.1);color:var(--green)}
+.smsg.warn{background:rgba(245,158,11,.1);color:var(--amber)}
+.smsg.err{background:rgba(239,68,68,.1);color:var(--red)}
+
+/* Project card */
+#proj-card{background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:var(--r);padding:10px;margin-bottom:8px;display:none}
+.proj-name{font-size:13px;font-weight:600;margin-bottom:3px}
+.proj-meta{font-size:10px;color:var(--muted);line-height:1.8}
+.badge{display:inline-block;padding:2px 7px;border-radius:10px;font-size:9px;font-weight:700;margin-left:4px}
+.b-ar{background:var(--accent-bg);color:var(--accent2)}
+.b-sim{background:rgba(245,158,11,.15);color:var(--amber)}
+
+/* Layer status list */
+.layer-status{display:flex;flex-direction:column;gap:3px}
+.ls-row{display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:var(--r-sm);font-size:11px}
+.ls-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.ls-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ls-status{font-size:10px;color:var(--muted)}
+
+/* Cam btns */
+.cam-row{display:flex;gap:6px}
+.cam-row .btn{flex:1;font-size:11px;padding:7px 4px}
+
+/* Readout grid */
+.readout{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+.ri{background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:var(--r-sm);padding:5px 7px}
+.rk{font-size:9px;color:var(--muted)}
+.rv{font-size:12px;font-weight:500;font-variant-numeric:tabular-nums}
+
+/* Panel scroll */
+.panel-scroll{flex:1;overflow-y:auto}
+::-webkit-scrollbar{width:3px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+
+/* Cloud load banner */
+.cloud-banner{background:linear-gradient(90deg,rgba(124,111,247,0.18),rgba(124,111,247,0.08));border:1px solid rgba(124,111,247,0.3);border-radius:var(--r-sm);padding:6px 10px;font-size:11px;color:var(--accent2);display:flex;align-items:center;gap:6px;margin-bottom:0}
+.cloud-banner .cb-dot{width:7px;height:7px;border-radius:50%;background:var(--green);flex-shrink:0;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.cloud-loader{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:200;flex-direction:column;align-items:center;justify-content:center;gap:14px}
+.cloud-loader.show{display:flex}
+.cl-spinner{width:40px;height:40px;border:3px solid rgba(124,111,247,.25);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.cl-msg{color:var(--text);font-size:13px}
+.cl-sub{color:var(--muted);font-size:11px}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="logo">AR Studio <span>/ Viewer</span></div>
+  <div class="sep"></div>
+  <div id="cloud-id-badge" style="display:none;font-size:11px;color:var(--muted);padding:4px 10px;border:1px solid var(--border);border-radius:20px"></div>
+  <button class="btn" onclick="document.getElementById('cfg-input').click()">Load config</button>
+  <input type="file" id="cfg-input" accept=".json" style="display:none" onchange="loadCfg(event)">
+  <button class="btn btn-accent" id="start-btn" onclick="startCamera()" disabled>Start camera</button>
+  <button class="btn" id="stop-btn" onclick="stopCamera()" style="display:none">Stop</button>
+</header>
+
+<!-- Cloud loading overlay -->
+<div class="cloud-loader" id="cloud-loader">
+  <div class="cl-spinner"></div>
+  <div class="cl-msg" id="cl-msg">Loading project from cloud…</div>
+  <div class="cl-sub" id="cl-sub">Fetching config and streaming videos</div>
+</div>
+
+<div class="main">
+
+  <!-- AR VIEW -->
+  <div id="ar-wrap">
+    <video id="cam-vid" autoplay playsinline muted></video>
+    <div id="ar-3d"></div>
+    <canvas id="ov-canvas"></canvas>
+    <div id="idle">
+      <div style="background:rgba(18,18,22,0.95);border:1px solid rgba(255,255,255,0.12);border-radius:14px;padding:28px 32px;max-width:420px;width:90%">
+        <div style="font-size:28px;margin-bottom:12px;text-align:center">📷</div>
+        <div style="font-size:15px;font-weight:600;color:#ededf0;margin-bottom:16px;text-align:center">AR Viewer</div>
+        <div id="idle-manual" style="font-size:12px;line-height:2.2;color:#a0a0b0">
+          <span style="color:#7c6ff7;font-weight:600">① Load config</span> — Click <strong style="color:#fff">"Load config"</strong> in the top bar<br>
+          <span style="color:#7c6ff7;font-weight:600">② Upload assets</span> — Upload image and video files in the right panel<br>
+          <span style="color:#7c6ff7;font-weight:600">③ Start camera</span> — Click <strong style="color:#fff">"Start camera"</strong><br>
+          <span style="color:#7c6ff7;font-weight:600">④ Scan artwork</span> — Point your camera at the trigger image<br>
+          <span style="color:#22c55e;font-weight:600">✨ Magic happens</span> — Your video(s) overlay on the artwork!
+        </div>
+        <div id="idle-cloud" style="display:none;font-size:12px;line-height:2.2;color:#a0a0b0">
+          <div class="cloud-banner" style="margin-bottom:12px">
+            <div class="cb-dot"></div>
+            <span id="idle-cloud-name">Cloud project loaded</span>
+          </div>
+          All assets are streaming from the cloud — no uploads needed!<br>
+          <span style="color:#7c6ff7;font-weight:600">Just tap</span> <strong style="color:#fff">"Start camera"</strong> and point at the trigger image.<br>
+          <span style="color:#22c55e;font-weight:600">✨ AR experience will play automatically</span>
+        </div>
+        <div style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.08);font-size:11px;color:#55555f;text-align:center">
+          💡 Best results: good lighting · textured trigger image · hold camera 30–60cm away
+        </div>
+      </div>
+    </div>
+    <div class="hud" id="hud-box"><div class="hc tl"></div><div class="hc tr"></div><div class="hc bl"></div><div class="hc br"></div></div>
+    <div class="hud" id="scan-hint">Point camera at artwork</div>
+    <div class="hud" id="detect-badge">✓ Detected</div>
+    <div class="hud" id="mode-chip"></div>
+  </div>
+
+  <!-- PANEL -->
+  <div id="panel">
+    <div class="panel-scroll">
+
+      <div class="psec">
+        <div class="psec-title">Project config</div>
+        <div id="cloud-panel-banner" class="cloud-banner" style="display:none;margin-bottom:8px">
+          <div class="cb-dot"></div>
+          <span id="cloud-panel-name">Loaded from cloud</span>
+        </div>
+        <div id="drop-zone">
+          <input type="file" accept=".json" onchange="loadCfg(event)">
+          <div style="font-size:20px;margin-bottom:4px">📂</div>
+          <p style="font-size:12px;color:var(--muted)">Drop ar-config.json here</p>
+        </div>
+        <div id="proj-card"></div>
+      </div>
+
+      <div class="psec">
+        <div class="psec-title">Assets</div>
+        <div class="asset-row" id="au-img">
+          <input type="file" accept="image/*" onchange="handleImg(event)">
+          <div class="ar-lbl">Trigger image <span class="ar-check" id="img-ck" style="display:none">✓</span></div>
+          <div class="ar-name" id="img-name">Click to upload</div>
+        </div>
+        <div class="asset-row" id="au-aud">
+          <input type="file" accept="audio/*" onchange="handleAud(event)">
+          <div class="ar-lbl">Soundtrack <span class="ar-check" id="aud-ck" style="display:none">✓</span></div>
+          <div class="ar-name" id="aud-name">Click to upload (optional)</div>
+        </div>
+        <div class="psec-title" style="margin-top:10px;margin-bottom:6px">Video layers</div>
+        <div id="layer-upload-list"></div>
+        <div id="panel-status"></div>
+      </div>
+
+      <div class="psec">
+        <div class="psec-title">Camera</div>
+        <div class="cam-row">
+          <button class="btn" id="p-start" onclick="startCamera()" disabled>▶ Start</button>
+          <button class="btn" id="p-stop" onclick="stopCamera()" disabled>■ Stop</button>
+          <button class="btn" id="p-flip" onclick="flipCam()" disabled>⇄ Flip</button>
+        </div>
+        <div id="cam-msg" class="smsg info" style="display:none"></div>
+      </div>
+
+      <div class="psec">
+        <div class="psec-title">Layers status</div>
+        <div class="layer-status" id="layer-status-list">
+          <div style="font-size:11px;color:var(--muted)">No layers loaded</div>
+        </div>
+      </div>
+
+      <div class="psec">
+        <div class="psec-title">Project info</div>
+        <div class="readout" id="readout">
+          <div class="ri"><div class="rk">Mode</div><div class="rv" id="r-mode">—</div></div>
+          <div class="ri"><div class="rk">Layers</div><div class="rv" id="r-layers">—</div></div>
+          <div class="ri"><div class="rk">Audio</div><div class="rv" id="r-audio">—</div></div>
+          <div class="ri"><div class="rk">Chroma</div><div class="rv" id="r-chroma">—</div></div>
+        </div>
+      </div>
+
+      <div class="psec">
+        <div class="psec-title" style="margin-bottom:8px">How to use</div>
+        <p style="font-size:11px;color:var(--muted);line-height:1.9">
+          1. Load <code>ar-config.json</code> from Creator<br>
+          2. Upload trigger image + video(s) in order<br>
+          3. Upload soundtrack (if any)<br>
+          4. Start camera → point at artwork<br>
+          5. Videos play in sync with timeline
+        </p>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image.prod.js" crossorigin="anonymous"></script>
+<script>
+// ── LIBRARY CHECK ─────────────────────────────────────────
+window.addEventListener('load',()=>{
+  const missing=[];
+  if(typeof THREE==='undefined') missing.push('Three.js');
+  if(typeof MINDAR==='undefined'||!MINDAR.IMAGE) missing.push('MindAR');
+  if(missing.length){
+    const banner=document.createElement('div');
+    banner.style.cssText='position:fixed;top:0;left:0;right:0;z-index:9999;background:#ef4444;color:#fff;padding:10px 16px;font-size:13px;text-align:center;font-family:system-ui,sans-serif';
+    banner.innerHTML=`⚠ Libraries failed to load (${missing.join(', ')}). Open this file in Chrome or Firefox with internet access. Don't open via file:// — use a local server or drag into browser from desktop.`;
+    document.body.prepend(banner);
+  }
+});
+
+// ── STATE ──────────────────────────────────────────────────
+let cfg=null;
+let imgURL=null;
+let audioEl=null,audioURL=null;
+// layers: [{cfgLayer, vidEl, url, loaded}]
+let viewerLayers=[];
+let camStream=null,mindarInst=null,simInterval=null,animLoop=null;
+let facingMode='environment';
+let tlTime=0,tlPlaying=false,tlRaf=null,tlLastTs=null;
+
+const ovC=document.getElementById('ov-canvas');
+const ovX=ovC.getContext('2d');
+
+// ── CLOUD AUTO-LOAD ───────────────────────────────────────
+const CLOUD_SERVER = window.location.origin;
+let isCloudProject = false;
+
+function showCloudLoader(msg, sub){
+  document.getElementById('cloud-loader').classList.add('show');
+  document.getElementById('cl-msg').textContent = msg || 'Loading from cloud…';
+  document.getElementById('cl-sub').textContent = sub || '';
+}
+function hideCloudLoader(){
+  document.getElementById('cloud-loader').classList.remove('show');
+}
+
+async function loadFromCloud(projectId){
+  showCloudLoader('Fetching project config…', `ID: ${projectId}`);
+  try{
+    const resp = await fetch(`${CLOUD_SERVER}/api/projects/${projectId}`);
+    if(!resp.ok) throw new Error('Project not found');
+    const data = await resp.json();
+    const project = data.project;
+
+    cfg = project.config_json;
+    isCloudProject = true;
+
+    // Rebuild AR buffer if present
+    if(cfg.arTargetBase64){
+      const bin = atob(cfg.arTargetBase64);
+      const b = new Uint8Array(bin.length);
+      for(let i=0;i<bin.length;i++) b[i]=bin.charCodeAt(i);
+      cfg._arBuf = b.buffer;
+    }
+
+    // Apply config metadata UI
+    applyCfgMeta();
+
+    // Stream videos from cloud URLs
+    showCloudLoader('Loading videos from cloud…', 'Streaming — this may take a moment');
+    viewerLayers = cfg.layers.map(cl => ({cfgLayer:cl, vidEl:null, url:null, loaded:false}));
+
+    let loadedCount = 0;
+    const videoPromises = cfg.layers.map((layer, i) => {
+      return new Promise(resolve => {
+        if(!layer.videoUrl){ resolve(); return; }
+        const vidEl = document.createElement('video');
+        vidEl.crossOrigin = 'anonymous';
+        vidEl.playsInline = true;
+        vidEl.muted = true;
+        vidEl.loop = true;
+        vidEl.src = layer.videoUrl;
+        vidEl.oncanplay = () => {
+          viewerLayers[i].vidEl = vidEl;
+          viewerLayers[i].url = layer.videoUrl;
+          viewerLayers[i].loaded = true;
+          loadedCount++;
+          showCloudLoader(
+            `Loading videos (${loadedCount}/${cfg.layers.length})…`,
+            layer.name || `Layer ${i+1}`
+          );
+          resolve();
+        };
+        vidEl.onerror = () => resolve(); // skip failed videos
+        vidEl.load();
+      });
+    });
+
+    // Load audio from cloud
+    if(cfg.audio && cfg.audio.audioUrl){
+      showCloudLoader('Loading audio…', '');
+      audioEl = new Audio();
+      audioEl.crossOrigin = 'anonymous';
+      audioEl.src = cfg.audio.audioUrl;
+      audioEl.loop = cfg.audio.loop || true;
+      audioEl.volume = (cfg.audio.volume || 80) / 100;
+      audioURL = cfg.audio.audioUrl;
+    }
+
+    await Promise.all(videoPromises);
+
+    // Update UI for cloud mode
+    document.getElementById('drop-zone').style.display = 'none';
+    document.getElementById('cloud-panel-banner').style.display = 'flex';
+    document.getElementById('cloud-panel-name').textContent = `☁ ${project.name}`;
+    document.getElementById('cloud-id-badge').style.display = 'block';
+    document.getElementById('cloud-id-badge').textContent = `ID: ${projectId.slice(0,8)}…`;
+    document.getElementById('idle-manual').style.display = 'none';
+    document.getElementById('idle-cloud').style.display = 'block';
+    document.getElementById('idle-cloud-name').textContent = `☁ ${project.name}`;
+
+    // Hide manual asset upload rows (not needed for cloud projects)
+    document.getElementById('au-img').style.display = 'none';
+    document.getElementById('au-aud').style.display = cfg.audio ? 'none' : '';
+
+    renderLayerStatusCloud();
+    checkReady();
+    hideCloudLoader();
+
+  } catch(err){
+    hideCloudLoader();
+    setPanelStatus('Cloud load failed: ' + err.message, 'err');
+    console.error('Cloud load error:', err);
+  }
+}
+
+function applyCfgMeta(){
+  if(!cfg) return;
+  const card = document.getElementById('proj-card');
+  card.style.display = 'block';
+  const bClass = cfg.mode==='ar' ? 'b-ar' : 'b-sim';
+  card.innerHTML = `<div class="proj-name">${cfg.project?.name||'Project'}<span class="badge ${bClass}">${(cfg.mode||'AR').toUpperCase()}</span></div>
+    <div class="proj-meta">
+      Layers: ${cfg.layers?.length||0} · Audio: ${cfg.audio?'Yes':'No'}<br>
+      Timeline: ${cfg.timeline?.duration||30}s · Chroma: ${cfg.layers?.some(l=>l.chroma?.on)?'On':'Off'}
+    </div>`;
+  document.getElementById('r-mode').textContent=(cfg.mode||'AR').toUpperCase();
+  document.getElementById('r-layers').textContent=cfg.layers?.length||0;
+  document.getElementById('r-audio').textContent=cfg.audio?'Yes':'No';
+  document.getElementById('r-chroma').textContent=cfg.layers?.some(l=>l.chroma?.on)?'On':'Off';
+}
+
+function renderLayerStatusCloud(){
+  const list = document.getElementById('layer-upload-list');
+  list.innerHTML = '';
+  viewerLayers.forEach((vl, i) => {
+    const div = document.createElement('div');
+    div.className = 'layer-upload-row' + (vl.loaded ? ' loaded' : '');
+    div.style.pointerEvents = 'none';
+    div.innerHTML = `
+      <span class="lu-icon">${vl.loaded ? '✅' : '⏳'}</span>
+      <div class="lu-info">
+        <div class="lu-name">${vl.cfgLayer.name||'Layer '+(i+1)}</div>
+        <div class="lu-sub">${vl.loaded ? 'Streaming from cloud ☁' : 'Loading…'}</div>
+      </div>`;
+    list.appendChild(div);
+  });
+}
+
+// Auto-detect ?id= param on page load
+window.addEventListener('DOMContentLoaded', () => {
+  const params = new URLSearchParams(window.location.search);
+  const projectId = params.get('id');
+  if(projectId){
+    loadFromCloud(projectId);
+  }
+});
+
+// ── CONFIG (manual file load) ────────────────────────────
+function loadCfg(e){
+  const file=e.target.files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    try{
+      cfg=JSON.parse(ev.target.result);
+      applyCfg();
+    }catch(err){setPanelStatus('Invalid config file','err');}
+  };
+  reader.readAsText(file);
+}
+
+function applyCfg(){
+  if(!cfg)return;
+
+  // Rebuild AR buffer
+  if(cfg.arTargetBase64){
+    const bin=atob(cfg.arTargetBase64);
+    const b=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++)b[i]=bin.charCodeAt(i);
+    cfg._arBuf=b.buffer;
+  }
+
+  // Project card
+  const card=document.getElementById('proj-card');
+  card.style.display='block';
+  const bClass=cfg.mode==='ar'?'b-ar':'b-sim';
+  card.innerHTML=`<div class="proj-name">${cfg.project.name}<span class="badge ${bClass}">${cfg.mode.toUpperCase()}</span></div>
+    <div class="proj-meta">
+      Layers: ${cfg.layers.length} · Audio: ${cfg.audio?'Yes':'No'}<br>
+      Timeline: ${cfg.timeline?.duration||30}s · Chroma: ${cfg.layers.some(l=>l.chroma.on)?'On':'Off'}
+    </div>`;
+
+  // Readout
+  document.getElementById('r-mode').textContent=cfg.mode.toUpperCase();
+  document.getElementById('r-layers').textContent=cfg.layers.length;
+  document.getElementById('r-audio').textContent=cfg.audio?'Yes':'No';
+  document.getElementById('r-chroma').textContent=cfg.layers.some(l=>l.chroma.on)?'On':'Off';
+
+  // Build layer upload slots
+  viewerLayers=cfg.layers.map(cl=>({cfgLayer:cl,vidEl:null,url:null,loaded:false}));
+  renderLayerUploads();
+  checkReady();
+}
+
+function renderLayerUploads(){
+  const list=document.getElementById('layer-upload-list');
+  list.innerHTML='';
+  viewerLayers.forEach((vl,i)=>{
+    const div=document.createElement('div');
+    div.className='layer-upload-row'+(vl.loaded?' loaded':'');
+    div.innerHTML=`
+      <input type="file" accept="video/*" data-idx="${i}" onchange="handleLayerVid(event,${i})">
+      <span class="lu-icon">${vl.loaded?'✅':'🎬'}</span>
+      <div class="lu-info">
+        <div class="lu-name">${vl.cfgLayer.name}</div>
+        <div class="lu-sub">Layer ${i+1} · ${vl.loaded?'Loaded':'Click to upload'}</div>
+      </div>`;
+    list.appendChild(div);
+  });
+  updateLayerStatusList();
+}
+
+function handleLayerVid(e,idx){
+  const file=e.target.files[0];if(!file)return;
+  const url=URL.createObjectURL(file);
+  const vl=viewerLayers[idx];
+  const cl=vl.cfgLayer;
+  const ve=document.createElement('video');
+  ve.src=url;ve.playsInline=true;
+  ve.loop=cl.sound.loop;
+  ve.muted=cl.sound.muted;
+  ve.playbackRate=cl.sound.speed;
+  vl.vidEl=ve;vl.url=url;vl.loaded=true;
+  renderLayerUploads();
+  checkReady();
+}
+
+function handleImg(e){
+  const file=e.target.files[0];if(!file)return;
+  imgURL=URL.createObjectURL(file);
+  document.getElementById('img-name').textContent=file.name;
+  document.getElementById('img-ck').style.display='inline';
+  document.getElementById('au-img').classList.add('loaded');
+  checkReady();
+}
+
+function handleAud(e){
+  const file=e.target.files[0];if(!file)return;
+  audioURL=URL.createObjectURL(file);
+  audioEl=new Audio(audioURL);
+  if(cfg&&cfg.audio){
+    audioEl.volume=(cfg.audio.volume||80)/100;
+    audioEl.loop=cfg.audio.loop;
+  }
+  document.getElementById('aud-name').textContent=file.name;
+  document.getElementById('aud-ck').style.display='inline';
+  document.getElementById('au-aud').classList.add('loaded');
+}
+
+function checkReady(){
+  const ready=imgURL&&viewerLayers.every(vl=>vl.loaded);
+  document.getElementById('start-btn').disabled=!ready;
+  document.getElementById('p-start').disabled=!ready;
+  if(ready)setPanelStatus('All assets loaded — ready to start','ok');
+  else setPanelStatus(`Upload image and ${viewerLayers.filter(v=>!v.loaded).length} remaining video(s)`,'info');
+}
+
+function updateLayerStatusList(){
+  const el=document.getElementById('layer-status-list');
+  if(viewerLayers.length===0){el.innerHTML='<div style="font-size:11px;color:var(--muted)">No layers loaded</div>';return;}
+  const colors=['#7c6ff7','#3b82f6','#22c55e','#ef4444','#a855f7','#14b8a6'];
+  el.innerHTML=viewerLayers.map((vl,i)=>`
+    <div class="ls-row">
+      <div class="ls-dot" style="background:${colors[i%colors.length]}"></div>
+      <div class="ls-name">${vl.cfgLayer.name}</div>
+      <div class="ls-status">${vl.loaded?'✓ ready':'waiting…'}</div>
+    </div>`).join('');
+}
+
+// ── CAMERA ────────────────────────────────────────────────
+async function startCamera(){
+  setCamMsg('Requesting camera…','info');
+  try{
+    camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode},audio:false});
+    const feed=document.getElementById('cam-vid');
+    feed.srcObject=camStream;feed.style.display='block';
+    document.getElementById('idle').style.display='none';
+    document.getElementById('hud-box').style.display='block';
+    document.getElementById('scan-hint').style.display='block';
+    document.getElementById('start-btn').style.display='none';
+    document.getElementById('stop-btn').style.display='block';
+    document.getElementById('p-start').disabled=true;
+    document.getElementById('p-stop').disabled=false;
+    document.getElementById('p-flip').disabled=false;
+
+    // Resize canvas
+    const wrap=document.getElementById('ar-wrap');
+    ovC.width=wrap.offsetWidth;ovC.height=wrap.offsetHeight;
+
+    const libsOk=typeof THREE!=='undefined'&&typeof MINDAR!=='undefined'&&MINDAR.IMAGE;
+    if(cfg&&cfg._arBuf&&libsOk){
+      await startMindAR();
+    } else {
+      if(cfg&&cfg._arBuf&&!libsOk){
+        setCamMsg('AR libraries not loaded — using motion-trigger fallback. Check internet connection.','warn');
+      }
+      startMotion();
+      showChip('sim','Motion trigger');
+      if(libsOk) setCamMsg('Motion-trigger: hold camera still over artwork to play video','warn');
+    }
+  }catch(err){setCamMsg('Camera error: '+err.message,'err');}
+}
+
+async function startMindAR(){
+  try{
+    const container=document.getElementById('ar-3d');
+    container.style.cssText='position:absolute;inset:0';
+
+    mindarInst=new MINDAR.IMAGE.MindARThree({
+      container,imageTargetSrc:cfg._arBuf,uiLoading:'no',uiScanning:'no'
+    });
+    const{renderer,scene,camera}=mindarInst;
+    const anchor=mindarInst.addAnchor(0);
+
+    // Build Three meshes per layer
+    const meshes=viewerLayers.map((vl,i)=>{
+      const cl=vl.cfgLayer;const T=cl.transform;
+      const vw=vl.vidEl.videoWidth||640,vh=vl.vidEl.videoHeight||360;
+      const gW=(T.w||vw)/300*(T.scale||1)*(1+(T.z||0)*0.1);
+      const gH=(T.h||vh)/300*(T.scale||1)*(1+(T.z||0)*0.1);
+      const tex=new THREE.VideoTexture(vl.vidEl);
+      const mat=new THREE.MeshBasicMaterial({map:tex,side:THREE.DoubleSide,transparent:true,opacity:T.opacity??1});
+      const mesh=new THREE.Mesh(new THREE.PlaneGeometry(gW,gH),mat);
+      mesh.position.set((T.x||0)/300,(-(T.y||0))/200,i*0.001);
+      mesh.rotation.z=(T.rot||0)*Math.PI/180;
+      anchor.group.add(mesh);
+      return mesh;
+    });
+
+    anchor.onTargetFound=()=>{
+      document.getElementById('detect-badge').style.display='block';
+      document.getElementById('hud-box').style.opacity='.3';
+      onDetected();
+    };
+    anchor.onTargetLost=()=>{
+      document.getElementById('detect-badge').style.display='none';
+      document.getElementById('hud-box').style.opacity='1';
+      onLost();
+    };
+
+    await mindarInst.start();
+
+    // Chroma overlay on top
+    if(viewerLayers.some(vl=>vl.cfgLayer.chroma.on)){
+      startChromaOverlay();
+    }
+
+    renderer.setAnimationLoop(()=>renderer.render(scene,camera));
+    showChip('ar','AR tracking');
+    setCamMsg('AR active — point at artwork','ok');
+  }catch(err){
+    setCamMsg('AR error, falling back to motion: '+err.message,'warn');
+    startMotion();showChip('sim','Motion trigger');
+  }
+}
+
+function onDetected(){
+  tlPlaying=true;tlLastTs=null;
+  viewerLayers.forEach(vl=>{
+    const cl=vl.cfgLayer;
+    const startAt=cl.sound.startAt||0;
+    vl.vidEl.currentTime=startAt;
+    vl.vidEl.play().catch(()=>{});
+  });
+  if(audioEl&&cfg.audio){
+    audioEl.currentTime=cfg.audio.startAt||0;
+    audioEl.play().catch(()=>{});
+  }
+  tlRaf=requestAnimationFrame(tlStep);
+}
+
+function onLost(){
+  tlPlaying=false;
+  if(tlRaf){cancelAnimationFrame(tlRaf);tlRaf=null;}
+  viewerLayers.forEach(vl=>vl.vidEl.pause());
+  if(audioEl)audioEl.pause();
+}
+
+function tlStep(ts){
+  if(tlLastTs===null)tlLastTs=ts;
+  const dt=(ts-tlLastTs)/1000;tlLastTs=ts;
+  tlTime+=dt;
+  const dur=cfg?.timeline?.duration||30;
+  if(tlTime>=dur){
+    tlTime=0;
+    // loop: restart videos
+    viewerLayers.forEach(vl=>vl.vidEl.currentTime=vl.cfgLayer.sound.startAt||0);
+  }
+  // Timeline-gated playback: only play layers within their window
+  viewerLayers.forEach(vl=>{
+    const cl=vl.cfgLayer;
+    const inWindow=tlTime>=cl.tlStart&&tlTime<cl.tlStart+(cl.tlDur||10);
+    if(inWindow&&vl.vidEl.paused)vl.vidEl.play().catch(()=>{});
+    else if(!inWindow&&!vl.vidEl.paused)vl.vidEl.pause();
+  });
+  if(tlPlaying)tlRaf=requestAnimationFrame(tlStep);
+}
+
+function startChromaOverlay(){
+  const wrap=document.getElementById('ar-wrap');
+  function loop(){
+    ovC.width=wrap.offsetWidth;ovC.height=wrap.offsetHeight;
+    const W=ovC.width,H=ovC.height;
+    ovX.clearRect(0,0,W,H);
+    viewerLayers.forEach(vl=>{
+      const cl=vl.cfgLayer;
+      if(!cl.chroma.on||vl.vidEl.readyState<2)return;
+      drawLayerWithChroma(ovX,vl,W,H);
+    });
+    animLoop=requestAnimationFrame(loop);
+  }
+  loop();
+}
+
+function drawLayerWithChroma(ctx,vl,W,H){
+  const cl=vl.cfgLayer;const T=cl.transform;const C=cl.chroma;
+  const ve=vl.vidEl;
+  const vw=ve.videoWidth||640,vh=ve.videoHeight||360;
+  const dw=(T.w||vw)*(T.scale||1)*(1+(T.z||0)*0.1);
+  const dh=(T.h||vh)*(T.scale||1)*(1+(T.z||0)*0.1);
+  const cl2=T.cropL/100,cr=T.cropR/100,ct=T.cropT/100,cb=T.cropB/100;
+  const srcX=vw*cl2,srcY=vh*ct,srcW=vw*(1-cl2-cr),srcH=vh*(1-ct-cb);
+  const dW=dw*(1-cl2-cr),dH=dh*(1-ct-cb);
+  const cx=W/2+(T.x||0),cy=H/2+(T.y||0);
+
+  const tmp=document.createElement('canvas');
+  tmp.width=Math.max(1,Math.round(srcW));tmp.height=Math.max(1,Math.round(srcH));
+  const tc=tmp.getContext('2d');
+  tc.drawImage(ve,srcX,srcY,srcW,srcH,0,0,tmp.width,tmp.height);
+
+  const id=tc.getImageData(0,0,tmp.width,tmp.height);const d=id.data;
+  const thr=C.sim*2.55,fea=C.smooth*2.55,sp=C.spill/100;
+  for(let i=0;i<d.length;i+=4){
+    const dist=Math.sqrt((d[i]-C.r)**2+(d[i+1]-C.g)**2+(d[i+2]-C.b)**2);
+    if(dist<thr){d[i+3]=0;}
+    else if(dist<thr+fea){
+      d[i+3]=Math.round(255*(dist-thr)/fea);
+      if(sp>0){const avg=(d[i]+d[i+2])/2;d[i+1]=Math.round(d[i+1]*(1-sp)+avg*sp);}
+    }
+  }
+  tc.putImageData(id,0,0);
+
+  ctx.save();
+  ctx.globalAlpha=T.opacity??1;
+  ctx.translate(cx,cy);
+  ctx.rotate((T.rot||0)*Math.PI/180);
+  ctx.translate(-dW/2,-dH/2);
+  ctx.drawImage(tmp,0,0,dW,dH);
+  ctx.restore();
+}
+
+function startMotion(){
+  const feed=document.getElementById('cam-vid');
+  const tmp=document.createElement('canvas');tmp.width=80;tmp.height=60;
+  const tc=tmp.getContext('2d');
+  let stillFrames=0,detected=false,last=null;
+
+  const renderFrame=()=>{
+    const wrap=document.getElementById('ar-wrap');
+    ovC.width=wrap.offsetWidth;ovC.height=wrap.offsetHeight;
+    ovX.clearRect(0,0,ovC.width,ovC.height);
+    viewerLayers.forEach(vl=>{
+      if(vl.vidEl.readyState<2)return;
+      const cl=vl.cfgLayer;
+      if(cl.chroma.on){drawLayerWithChroma(ovX,vl,ovC.width,ovC.height);}
+      else {
+        const T=cl.transform;const W=ovC.width,H=ovC.height;
+        const ve=vl.vidEl;
+        const vw=ve.videoWidth||640,vh=ve.videoHeight||360;
+        const dw=(T.w||vw)*(T.scale||1),dh=(T.h||vh)*(T.scale||1);
+        const cl2=T.cropL/100,cr=T.cropR/100,ct=T.cropT/100,cb=T.cropB/100;
+        const srcX=vw*cl2,srcY=vh*ct,srcW=vw*(1-cl2-cr),srcH=vh*(1-ct-cb);
+        const dW=dw*(1-cl2-cr),dH=dh*(1-ct-cb);
+        ovX.save();ovX.globalAlpha=T.opacity??1;
+        ovX.translate(W/2+(T.x||0),H/2+(T.y||0));
+        ovX.rotate((T.rot||0)*Math.PI/180);
+        ovX.translate(-dW/2,-dH/2);
+        ovX.drawImage(ve,srcX,srcY,srcW,srcH,0,0,dW,dH);
+        ovX.restore();
+      }
+    });
+    if(detected)animLoop=requestAnimationFrame(renderFrame);
+  };
+
+  simInterval=setInterval(()=>{
+    if(feed.readyState<2)return;
+    tc.drawImage(feed,0,0,80,60);
+    const curr=tc.getImageData(0,0,80,60).data;
+    if(last){
+      let diff=0;for(let i=0;i<curr.length;i+=4)diff+=Math.abs(curr[i]-last[i])+Math.abs(curr[i+1]-last[i+1])+Math.abs(curr[i+2]-last[i+2]);
+      const avg=diff/(curr.length/4*3);
+      if(avg<8){
+        stillFrames++;
+        if(stillFrames>8&&!detected){
+          detected=true;
+          document.getElementById('detect-badge').style.display='block';
+          onDetected();
+          renderFrame();
+        }
+      } else {
+        stillFrames=0;
+        if(detected){
+          detected=false;
+          document.getElementById('detect-badge').style.display='none';
+          ovX.clearRect(0,0,ovC.width,ovC.height);
+          if(animLoop){cancelAnimationFrame(animLoop);animLoop=null;}
+          onLost();
+        }
+      }
+    }
+    last=new Uint8ClampedArray(curr);
+  },100);
+}
+
+function stopCamera(){
+  if(animLoop){cancelAnimationFrame(animLoop);animLoop=null;}
+  if(tlRaf){cancelAnimationFrame(tlRaf);tlRaf=null;}
+  if(simInterval){clearInterval(simInterval);simInterval=null;}
+  if(mindarInst){try{mindarInst.stop();mindarInst.renderer.setAnimationLoop(null);}catch(e){}mindarInst=null;}
+  if(camStream){camStream.getTracks().forEach(t=>t.stop());camStream=null;}
+  viewerLayers.forEach(vl=>vl.vidEl&&vl.vidEl.pause());
+  if(audioEl)audioEl.pause();
+  tlPlaying=false;tlTime=0;
+  const feed=document.getElementById('cam-vid');feed.srcObject=null;feed.style.display='none';
+  document.getElementById('idle').style.display='flex';
+  document.getElementById('hud-box').style.display='none';
+  document.getElementById('scan-hint').style.display='none';
+  document.getElementById('detect-badge').style.display='none';
+  document.getElementById('mode-chip').style.display='none';
+  document.getElementById('start-btn').style.display='block';
+  document.getElementById('stop-btn').style.display='none';
+  document.getElementById('p-start').disabled=false;
+  document.getElementById('p-stop').disabled=true;
+  document.getElementById('p-flip').disabled=true;
+  ovX.clearRect(0,0,ovC.width,ovC.height);
+  setCamMsg('','');
+}
+
+function flipCam(){facingMode=facingMode==='environment'?'user':'environment';stopCamera();setTimeout(()=>startCamera(),250);}
+
+function showChip(type,label){
+  const c=document.getElementById('mode-chip');
+  c.className='hud chip-'+type;c.textContent=label;c.style.display='block';
+}
+function setCamMsg(msg,type){
+  const el=document.getElementById('cam-msg');
+  el.style.display=msg?'block':'none';el.className='smsg '+type;el.textContent=msg;
+}
+function setPanelStatus(msg,type){
+  document.getElementById('panel-status').innerHTML=msg?`<div class="smsg ${type}">${msg}</div>`:'';
+}
+
+// Drag-drop config
+const dz=document.getElementById('drop-zone');
+dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('drag');});
+dz.addEventListener('dragleave',()=>dz.classList.remove('drag'));
+dz.addEventListener('drop',e=>{
+  e.preventDefault();dz.classList.remove('drag');
+  const f=e.dataTransfer.files[0];
+  if(f)loadCfg({target:{files:[f]}});
+});
+</script>
+</body>
+</html>
