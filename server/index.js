@@ -32,8 +32,8 @@ const upload = multer({
 });
 
 // ── Serve static files (creator.html / viewer.html) ─────────────────────────
-// In Docker: creator.html and viewer.html are copied to /app alongside index.js
-app.use(express.static(path.join(__dirname)));
+// __dirname = server/ folder, parent = repo root with creator.html + viewer.html
+app.use(express.static(path.join(__dirname, '..')));
 
 // ── Health check ─────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => {
