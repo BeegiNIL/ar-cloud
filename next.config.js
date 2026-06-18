@@ -2,6 +2,12 @@
 const nextConfig = {
   eslint: { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors: true },
+  async redirects() {
+    return [
+      { source: '/viewer', destination: '/viewer.html', permanent: false },
+      { source: '/creator', destination: '/creator.html', permanent: false }
+    ];
+  },
   // Long cache for self-hosted library files
   async headers() {
     return [
