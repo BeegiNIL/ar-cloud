@@ -1,10 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Allow large API payloads for project saves
-  api: {
-    bodyParser: { sizeLimit: '10mb' }
-  },
-  // Serve /libs/ files from public/libs/
+  // Long cache for self-hosted library files
   async headers() {
     return [
       {

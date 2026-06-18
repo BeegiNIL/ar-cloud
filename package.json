@@ -9,7 +9,7 @@
     "postinstall": "node scripts/copy-libs.js"
   },
   "dependencies": {
-    "next": "14.2.3",
+    "next": "14.2.25",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "@supabase/supabase-js": "^2.43.1"
