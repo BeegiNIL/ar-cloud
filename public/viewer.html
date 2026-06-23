@@ -202,7 +202,7 @@ function loadImage(url) {
   });
 }
 
-// ── Compile trigger images into .mind buffer ───────────────────────────────
+// ── Compile trigger images → .mind buffer ────────────────────────────────
 async function compileTargets(projectList) {
   if (!window.MINDAR?.IMAGE?.Compiler) {
     throw new Error('MindAR Compiler not available. Please refresh the page.');
@@ -235,6 +235,26 @@ async function compileTargets(projectList) {
   const buffer = await compiler.exportData();
   return { buffer, projects: images.map(i => i.project) };
 }
+
+// ── Smart buffer fetch: use pre-compiled .mind if available ───────────────
+async function getARBuffer(projectList) {
+  // Single project with a pre-compiled .mind file → download directly (instant!)
+  if (projectList.length === 1 && projectList[0].config_json?.mindUrl) {
+    setProgress(40, '⚡ Downloading pre-compiled AR data…');
+    try {
+      const res = await fetch(projectList[0].config_json.mindUrl);
+      if (res.ok) {
+        setProgress(80, 'AR data ready!');
+        const buffer = await res.arrayBuffer();
+        return { buffer, projects: projectList };
+      }
+    } catch (e) { console.warn('mindUrl fetch failed, falling back to compile:', e.message); }
+  }
+
+  // Multiple projects or no mindUrl → compile from trigger images
+  return await compileTargets(projectList);
+}
+
 
 // ── Build the AR scene and start camera ───────────────────────────────────
 async function startAR(buffer, orderedProjects) {
@@ -346,12 +366,12 @@ async function startAR(buffer, orderedProjects) {
       const missing = allProjects.filter(p => !cached.projectIds.includes(p.id));
       if (missing.length) {
         setProgress(30, `${missing.length} new project(s) — recompiling…`);
-        ({ buffer, projects: orderedProjects } = await compileTargets(allProjects));
+        ({ buffer, projects: orderedProjects } = await getARBuffer(allProjects));
         await cachePut(db, cacheKey, { buffer, projectIds: orderedProjects.map(p => p.id) });
       }
     } else {
-      setProgress(15, 'First time — compiling AR targets…');
-      ({ buffer, projects: orderedProjects } = await compileTargets(allProjects));
+      setProgress(15, 'First time — preparing AR targets…');
+      ({ buffer, projects: orderedProjects } = await getARBuffer(allProjects));
       try {
         await cachePut(db, cacheKey, { buffer, projectIds: orderedProjects.map(p => p.id) });
         console.log('✅ Cached on device');

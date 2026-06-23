@@ -41,7 +41,7 @@ export default async function handler(req, res) {
 
   // ── POST save project ─────────────────────────────────────────────────────
   if (req.method === 'POST') {
-    const { config: cfg, triggerImageUrl, videoUrls, audioUrl, _projectId } = req.body;
+    const { config: cfg, triggerImageUrl, videoUrls, audioUrl, mindUrl, _projectId } = req.body;
     if (!cfg) return res.status(400).json({ error: 'Missing config' });
 
     const projectId = _projectId || uuidv4();
@@ -57,6 +57,7 @@ export default async function handler(req, res) {
         ...cfg,
         layers,
         triggerImageUrl,    // used by universal viewer to recompile targets
+        mindUrl: mindUrl || null, // pre-compiled .mind file — viewer uses this directly
         audio: audioUrl ? { ...cfg.audio, audioUrl } : cfg.audio
       };
 

@@ -1295,8 +1295,17 @@ async function uploadToCloud(){
       audioUrl = await uploadFileDirect(audioFile, `${folder}/audio.${ext}`);
     }
 
+    // ── Upload pre-compiled .mind file (viewer skips compilation) ─────
+    let mindUrl=null;
+    if(arBuffer){
+      setCloudStatus('Uploading AR tracking data…', 80);
+      const mindBlob=new Blob([arBuffer],{type:'application/octet-stream'});
+      const mindFile=new File([mindBlob],'target.mind',{type:'application/octet-stream'});
+      mindUrl = await uploadFileDirect(mindFile, `${folder}/target.mind`);
+    }
+
     // ── Save project metadata to DB (JSON only, no files) ────────────
-    setCloudStatus('Saving project…', 85);
+    setCloudStatus('Saving project…', 88);
     const resp = await fetch('/api/projects',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
@@ -1305,6 +1314,7 @@ async function uploadToCloud(){
         triggerImageUrl,
         videoUrls,
         audioUrl,
+        mindUrl,
         _projectId: tempId  // hint server to use same ID
       })
     });
