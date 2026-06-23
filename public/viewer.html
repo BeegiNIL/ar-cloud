@@ -127,29 +127,36 @@
 </script>
 <script type="module" src="/libs/mindar-image.prod.js"></script>
 <script type="module" src="/libs/mindar-image-three.prod.js"></script>
-<script>
+
+<!-- type="module" guarantees this runs AFTER the modules above have fully executed -->
+<script type="module">
 // ═══════════════════════════════════════════════════════════════════════
 //  AR STUDIO — UNIVERSAL VIEWER
-//  • Loads ALL saved projects from the server
-//  • Compiles all trigger images together (multi-target MindAR)
-//  • Caches compiled data on phone (IndexedDB) → instant on return visits
-//  • Detects which artwork is in view → plays its AR videos
+//  Loads all projects, compiles trigger images, caches on device.
 // ═══════════════════════════════════════════════════════════════════════
 
-const DB_NAME   = 'ar-studio-cache';
-const DB_VER    = 1;
-const STORE     = 'compiled-targets';
+const DB_NAME = 'ar-studio-cache';
+const DB_VER  = 1;
+const STORE   = 'compiled-targets';
 
-let mindarSession = null;
-let activeIndex   = -1;
-let projects      = [];
+let activeIndex = -1;
 
 // ── UI helpers ──────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
+
 const setProgress = (pct, step) => {
   $('loading-bar').style.width = pct + '%';
   $('loading-step').textContent = step;
 };
+
+const showError = (msg) => {
+  $('loading-title').textContent = '⚠️ Error';
+  $('loading-sub').textContent = msg;
+  $('loading-step').textContent = 'Please refresh and try again.';
+  $('loading-bar').style.background = '#ef4444';
+  $('loading-bar').style.width = '100%';
+};
+
 const hideLoading = () => { $('loading').style.display = 'none'; };
 
 // ── IndexedDB cache ──────────────────────────────────────────────────────
@@ -161,101 +168,106 @@ function openDB() {
     req.onerror   = e => rej(e.target.error);
   });
 }
-async function cacheGet(db, key) {
+function cacheGet(db, key) {
   return new Promise((res, rej) => {
-    const tx  = db.transaction(STORE, 'readonly');
-    const req = tx.objectStore(STORE).get(key);
+    const req = db.transaction(STORE, 'readonly').objectStore(STORE).get(key);
     req.onsuccess = e => res(e.target.result);
     req.onerror   = e => rej(e.target.error);
   });
 }
-async function cachePut(db, key, value) {
+function cachePut(db, key, value) {
   return new Promise((res, rej) => {
-    const tx  = db.transaction(STORE, 'readwrite');
-    const req = tx.objectStore(STORE).put(value, key);
+    const req = db.transaction(STORE, 'readwrite').objectStore(STORE).put(value, key);
     req.onsuccess = () => res();
     req.onerror   = e => rej(e.target.error);
   });
 }
 
-// ── Fetch all projects ───────────────────────────────────────────────────
+// ── Fetch all projects (includes config_json for video URLs) ─────────────
 async function fetchProjects() {
   const res  = await fetch('/api/projects');
+  if (!res.ok) throw new Error(`Server error ${res.status} — check Supabase env vars.`);
   const data = await res.json();
   return { projects: data.projects || [], version: data.version || '' };
 }
 
-// ── Load image as HTMLImageElement ────────────────────────────────────────
+// ── Load image ────────────────────────────────────────────────────────────
 function loadImage(url) {
   return new Promise((res, rej) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload  = () => res(img);
-    img.onerror = () => rej(new Error('Failed to load image: ' + url));
+    img.onerror = () => rej(new Error('Cannot load: ' + url));
     img.src = url;
   });
 }
 
-// ── Compile ALL trigger images together ───────────────────────────────────
+// ── Compile trigger images into .mind buffer ───────────────────────────────
 async function compileTargets(projectList) {
-  const compiler = new MINDAR.IMAGE.Compiler();
+  if (!window.MINDAR?.IMAGE?.Compiler) {
+    throw new Error('MindAR Compiler not available. Please refresh the page.');
+  }
+  const compiler = new window.MINDAR.IMAGE.Compiler();
+  const images   = [];
 
-  const images = [];
   for (let i = 0; i < projectList.length; i++) {
-    const p = projectList[i];
-    const url = p.thumbnail_url || (p.config_json && p.config_json.triggerImageUrl);
-    if (!url) { console.warn('No trigger image for project', p.id); continue; }
+    const p   = projectList[i];
+    const url = p.thumbnail_url || p.config_json?.triggerImageUrl;
+    if (!url) { console.warn('No trigger image for', p.id); continue; }
 
-    setProgress(20 + Math.round((i / projectList.length) * 40), `Loading image ${i+1}/${projectList.length}…`);
+    setProgress(20 + Math.round((i / projectList.length) * 40),
+      `Loading image ${i + 1} / ${projectList.length}…`);
     try {
-      const img = await loadImage(url);
-      images.push({ img, project: p });
-    } catch (e) { console.warn('Skipped image for', p.name, e.message); }
+      images.push({ img: await loadImage(url), project: p });
+    } catch (e) {
+      console.warn('Skipped', p.name, '—', e.message);
+    }
   }
 
-  if (images.length === 0) throw new Error('No valid trigger images found');
+  if (images.length === 0) {
+    throw new Error('No trigger images could be loaded. Check Supabase storage CORS settings.');
+  }
 
-  setProgress(65, `Compiling ${images.length} AR target${images.length>1?'s':''}…`);
-  const compiled = await compiler.compileImageTargets(images.map(i => i.img));
+  setProgress(65, `Compiling ${images.length} target${images.length > 1 ? 's' : ''}… (~30s first time)`);
+  await compiler.compileImageTargets(images.map(i => i.img));
 
-  setProgress(85, 'Preparing AR session…');
+  setProgress(85, 'Exporting AR data…');
   const buffer = await compiler.exportData();
   return { buffer, projects: images.map(i => i.project) };
 }
 
-// ── Start MindAR session ──────────────────────────────────────────────────
+// ── Build the AR scene and start camera ───────────────────────────────────
 async function startAR(buffer, orderedProjects) {
-  const THREE   = window.THREE;
-  const MindAR  = window.MINDAR.IMAGE;
+  if (!window.MINDAR?.IMAGE?.MindARThree) {
+    throw new Error('MindARThree not available. Please refresh the page.');
+  }
 
-  // Container
-  const container = $('ar-container');
+  const THREE  = window.THREE;
+  const MindAR = window.MINDAR.IMAGE;
 
   const mindar = new MindAR.MindARThree({
-    container,
-    imageTargetSrc: buffer,  // ArrayBuffer accepted directly
-    uiLoading: 'no',
-    uiError:   'no',
-    uiScanning: 'no',
+    container:      $('ar-container'),
+    imageTargetSrc: buffer,
+    uiLoading:      'no',
+    uiError:        'no',
+    uiScanning:     'no',
   });
 
   const { renderer, scene, camera } = mindar;
 
-  // Create an anchor + video plane for each project
   orderedProjects.forEach((proj, index) => {
     const anchor = mindar.addAnchor(index);
-    const config  = proj.config_json || {};
-    const layers  = config.layers || [];
+    const config = proj.config_json || {};
+    const layers = config.layers   || [];
 
-    // Build video planes for each layer
     layers.forEach((layer, li) => {
       if (!layer.videoUrl) return;
 
-      const video = document.createElement('video');
-      video.src      = layer.videoUrl;
-      video.loop     = !!layer.loop;
-      video.muted    = true;
-      video.preload  = 'auto';
+      const video       = document.createElement('video');
+      video.src         = layer.videoUrl;
+      video.loop        = !!layer.loop;
+      video.muted       = true;
+      video.preload     = 'auto';
       video.playsInline = true;
       video.crossOrigin = 'anonymous';
 
@@ -264,13 +276,10 @@ async function startAR(buffer, orderedProjects) {
       const geo  = new THREE.PlaneGeometry(1, layer.aspect || 0.5625);
       const mesh = new THREE.Mesh(geo, mat);
 
-      // Apply layer transforms
       mesh.position.set(layer.x || 0, layer.y || 0, li * 0.001);
       mesh.scale.set(layer.scale || 1, layer.scale || 1, 1);
-
       anchor.group.add(mesh);
 
-      // Play/pause based on anchor visibility
       anchor.onTargetFound = () => {
         video.play().catch(() => {});
         activeIndex = index;
@@ -292,100 +301,70 @@ async function startAR(buffer, orderedProjects) {
       };
     });
 
-    // Handle audio (attached to first layer anchor)
-    if (index === 0 && config.audio?.audioUrl) {
-      const audio = new Audio(config.audio.audioUrl);
-      audio.loop  = true;
+    // Audio overlay
+    if (config.audio?.audioUrl) {
+      const audio  = new Audio(config.audio.audioUrl);
+      audio.loop   = true;
       audio.volume = config.audio?.volume ?? 1;
-      anchor.onTargetFound = (orig => () => { orig && orig(); audio.play().catch(()=>{}); })(anchor.onTargetFound);
-      anchor.onTargetLost  = (orig => () => { orig && orig(); audio.pause(); })(anchor.onTargetLost);
+      const prevFound = anchor.onTargetFound;
+      const prevLost  = anchor.onTargetLost;
+      anchor.onTargetFound = () => { prevFound?.(); audio.play().catch(() => {}); };
+      anchor.onTargetLost  = () => { prevLost?.();  audio.pause(); };
     }
   });
 
-  mindarSession = mindar;
-
   await mindar.start();
-  renderer.setAnimationLoop(() => {
-    renderer.render(scene, camera);
-  });
+  renderer.setAnimationLoop(() => renderer.render(scene, camera));
 }
 
 // ══ MAIN ══════════════════════════════════════════════════════════════════
 (async () => {
   try {
     setProgress(5, 'Fetching projects…');
-
     const { projects: allProjects, version } = await fetchProjects();
 
-    if (!allProjects || allProjects.length === 0) {
+    if (!allProjects.length) {
       $('loading').style.display = 'none';
       $('no-projects').style.display = 'flex';
       return;
     }
 
-    projects = allProjects;
-
-    // ── Check cache ──────────────────────────────────────────────────────
-    const db = await openDB();
+    // Cache check
+    const db       = await openDB();
     const cacheKey = 'targets-v' + version;
     let cached = null;
-
-    try { cached = await cacheGet(db, cacheKey); } catch(_) {}
+    try { cached = await cacheGet(db, cacheKey); } catch (_) {}
 
     let buffer, orderedProjects;
 
-    if (cached && cached.buffer && cached.projectIds) {
-      // Cache hit — use stored compiled data
+    if (cached?.buffer && cached?.projectIds) {
       setProgress(80, '⚡ Loading from device cache…');
-      buffer = cached.buffer;
-      // Match projects by stored order
-      orderedProjects = cached.projectIds
-        .map(id => allProjects.find(p => p.id === id))
-        .filter(Boolean);
+      buffer          = cached.buffer;
+      orderedProjects = cached.projectIds.map(id => allProjects.find(p => p.id === id)).filter(Boolean);
 
-      // Add any new projects not in cache
-      const cachedIds = new Set(cached.projectIds);
-      const newProjects = allProjects.filter(p => !cachedIds.has(p.id));
-
-      if (newProjects.length > 0) {
-        // New projects added → recompile everything and update cache
-        setProgress(30, `${newProjects.length} new project(s) detected, updating…`);
-        const result = await compileTargets(allProjects);
-        buffer = result.buffer;
-        orderedProjects = result.projects;
-        await cachePut(db, cacheKey, {
-          buffer,
-          projectIds: orderedProjects.map(p => p.id)
-        });
+      // Recompile if new projects were added
+      const missing = allProjects.filter(p => !cached.projectIds.includes(p.id));
+      if (missing.length) {
+        setProgress(30, `${missing.length} new project(s) — recompiling…`);
+        ({ buffer, projects: orderedProjects } = await compileTargets(allProjects));
+        await cachePut(db, cacheKey, { buffer, projectIds: orderedProjects.map(p => p.id) });
       }
     } else {
-      // No cache — compile from scratch
-      setProgress(15, 'First time setup — compiling AR targets…');
-      const result = await compileTargets(allProjects);
-      buffer = result.buffer;
-      orderedProjects = result.projects;
-
-      // Cache for next time
+      setProgress(15, 'First time — compiling AR targets…');
+      ({ buffer, projects: orderedProjects } = await compileTargets(allProjects));
       try {
-        await cachePut(db, cacheKey, {
-          buffer,
-          projectIds: orderedProjects.map(p => p.id)
-        });
-        console.log('✅ AR targets cached on device');
+        await cachePut(db, cacheKey, { buffer, projectIds: orderedProjects.map(p => p.id) });
+        console.log('✅ Cached on device');
       } catch (e) { console.warn('Cache write failed:', e); }
     }
 
     setProgress(95, 'Starting camera…');
     hideLoading();
-
     await startAR(buffer, orderedProjects);
 
   } catch (err) {
     console.error('AR Viewer error:', err);
-    $('loading-title').textContent = '⚠️ Error';
-    $('loading-sub').textContent = err.message || 'Something went wrong. Please refresh.';
-    $('loading-step').textContent = '';
-    $('loading-bar').style.background = '#ef4444';
+    showError(err.message || 'Something went wrong. Please refresh.');
   }
 })();
 </script>

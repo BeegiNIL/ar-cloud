@@ -25,7 +25,7 @@ export default async function handler(req, res) {
     try {
       const { data, error } = await supabase
         .from('projects')
-        .select('id, name, mode, layer_count, has_audio, thumbnail_url, created_at')
+        .select('id, name, mode, layer_count, has_audio, thumbnail_url, created_at, config_json')
         .order('created_at', { ascending: false });
 
       if (error) throw error;
